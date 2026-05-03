@@ -1,0 +1,15 @@
+[plugin]
+name = "codegolf"
+version = "0.1.0"
+description = "Code golf arena — write the shortest solution to programming puzzles"
+author = "corvid-agent"
+
+[[commands]]
+name = "golf"
+description = "Code golf challenges and leaderboard"
+binary = "bin/codegolf"
+
+[capabilities]
+exec = false
+store = false
+metadata = false

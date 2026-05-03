@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PLUGIN_DIR="${FLEDGE_PLUGIN_DIR:?FLEDGE_PLUGIN_DIR not set — fledge >= 0.15.3 sets it automatically}"
+
+CHALLENGES_DIR="$PLUGIN_DIR/challenges"
+SCORES_FILE="$PLUGIN_DIR/.scores.json"
+
+usage() {
+    cat <<'EOF'
+fledge golf — code golf arena
+
+USAGE:
+    fledge golf <command>
+
+COMMANDS:
+    challenge [id]    Show a challenge (random if no id)
+    list              List all available challenges
+    submit <id> <file>  Submit a solution
+    leaderboard [id]  Show scores (all or per-challenge)
+    verify <id> <file>  Check correctness without scoring
+
+EXAMPLES:
+    fledge golf challenge
+    fledge golf submit fizzbuzz solution.py
+    fledge golf leaderboard
+EOF
+}
+
+init_scores() {
+    if [[ ! -f "$SCORES_FILE" ]]; then
+        echo '{}' > "$SCORES_FILE"
+    fi
+}
+
+list_challenges() {
+    echo "Available challenges:"
+    echo ""
+    for f in "$CHALLENGES_DIR"/*.toml; do
+        [[ -f "$f" ]] || continue
+        local id=$(basename "$f" .toml)
+        local name=$(grep '^name' "$f" | head -1 | cut -d'"' -f2)
+        local difficulty=$(grep '^difficulty' "$f" | head -1 | cut -d'"' -f2)
+        printf "  %-15s %-30s [%s]\n" "$id" "$name" "$difficulty"
+    done
+}
+
+show_challenge() {
+    local id="${1:-}"
+    if [[ -z "$id" ]]; then
+        local files=("$CHALLENGES_DIR"/*.toml)
+        local count=${#files[@]}
+        if [[ $count -eq 0 ]]; then
+            echo "No challenges found."
+            exit 1
+        fi
+        local idx=$((RANDOM % count))
+        id=$(basename "${files[$idx]}" .toml)
+    fi
+
+    local file="$CHALLENGES_DIR/$id.toml"
+    if [[ ! -f "$file" ]]; then
+        echo "Challenge '$id' not found. Run 'fledge golf list' to see available challenges."
+        exit 1
+    fi
+
+    local name=$(grep '^name' "$file" | head -1 | cut -d'"' -f2)
+    local difficulty=$(grep '^difficulty' "$file" | head -1 | cut -d'"' -f2)
+    local description=$(grep '^description' "$file" | head -1 | cut -d'"' -f2)
+
+    echo "=== $name ==="
+    echo "ID: $id | Difficulty: $difficulty"
+    echo ""
+    echo "$description"
+    echo ""
+
+    if grep -q '^\[\[examples\]\]' "$file"; then
+        echo "Examples:"
+        grep '^input' "$file" | while IFS= read -r line; do
+            printf "  Input:  %s\n" "$(echo "$line" | cut -d'"' -f2)"
+        done
+        grep '^output' "$file" | while IFS= read -r line; do
+            printf "  Output: %s\n" "$(echo "$line" | cut -d'"' -f2)"
+        done
+    fi
+
+    echo ""
+    echo "Submit: fledge golf submit $id <your-solution-file>"
+}
+
+verify_solution() {
+    local id="$1"
+    local solution_file="$2"
+    local file="$CHALLENGES_DIR/$id.toml"
+
+    if [[ ! -f "$file" ]]; then
+        echo "Challenge '$id' not found."
+        exit 1
+    fi
+    if [[ ! -f "$solution_file" ]]; then
+        echo "Solution file '$solution_file' not found."
+        exit 1
+    fi
+
+    local test_dir="$CHALLENGES_DIR/tests/$id"
+    if [[ ! -d "$test_dir" ]]; then
+        echo "No test cases found for '$id'."
+        exit 1
+    fi
+
+    local ext="${solution_file##*.}"
+    local runner=""
+    case "$ext" in
+        py)  runner="python3" ;;
+        js)  runner="node" ;;
+        rb)  runner="ruby" ;;
+        sh)  runner="bash" ;;
+        pl)  runner="perl" ;;
+        lua) runner="lua" ;;
+        *)   runner="" ;;
+    esac
+
+    local passed=0
+    local failed=0
+    local total=0
+
+    for input_file in "$test_dir"/*.in; do
+        [[ -f "$input_file" ]] || continue
+        local base=$(basename "$input_file" .in)
+        local expected_file="$test_dir/$base.out"
+        [[ -f "$expected_file" ]] || continue
+
+        total=$((total + 1))
+        local actual=""
+        if [[ -n "$runner" ]]; then
+            actual=$($runner "$solution_file" < "$input_file" 2>/dev/null) || true
+        elif [[ -x "$solution_file" ]]; then
+            actual=$("$solution_file" < "$input_file" 2>/dev/null) || true
+        else
+            echo "Cannot run .$ext files — no interpreter found and file not executable."
+            exit 1
+        fi
+
+        local expected=$(cat "$expected_file")
+        if [[ "$actual" == "$expected" ]]; then
+            passed=$((passed + 1))
+        else
+            failed=$((failed + 1))
+            echo "  FAIL test $base: expected '$expected', got '$actual'"
+        fi
+    done
+
+    if [[ $total -eq 0 ]]; then
+        echo "No test cases found for '$id'."
+        exit 1
+    fi
+
+    echo "Results: $passed/$total passed"
+    [[ $failed -eq 0 ]]
+}
+
+submit_solution() {
+    local id="$1"
+    local solution_file="$2"
+
+    echo "Verifying solution..."
+    if ! verify_solution "$id" "$solution_file"; then
+        echo ""
+        echo "Solution incorrect — not scored."
+        exit 1
+    fi
+
+    local bytes=$(wc -c < "$solution_file" | tr -d ' ')
+    local player="${FLEDGE_GOLF_PLAYER:-$(whoami)}"
+
+    init_scores
+    local current_best=""
+    if command -v jq &>/dev/null; then
+        current_best=$(jq -r --arg id "$id" --arg p "$player" '.[$id][$p] // empty' "$SCORES_FILE" 2>/dev/null || true)
+
+        local tmp=$(mktemp)
+        jq --arg id "$id" --arg p "$player" --argjson b "$bytes" \
+            '.[$id] //= {} | .[$id][$p] = (if .[$id][$p] == null or $b < .[$id][$p] then $b else .[$id][$p] end)' \
+            "$SCORES_FILE" > "$tmp" && mv "$tmp" "$SCORES_FILE"
+    else
+        echo "$player: $bytes bytes" >> "$SCORES_FILE.txt"
+    fi
+
+    echo ""
+    echo "Submitted! $bytes bytes"
+    if [[ -n "$current_best" ]] && [[ "$bytes" -lt "$current_best" ]]; then
+        echo "New personal best! (was $current_best bytes)"
+    elif [[ -n "$current_best" ]]; then
+        echo "Personal best: $current_best bytes"
+    fi
+}
+
+show_leaderboard() {
+    local id="${1:-}"
+    init_scores
+
+    if ! command -v jq &>/dev/null; then
+        echo "jq required for leaderboard. Install: brew install jq"
+        exit 1
+    fi
+
+    if [[ -n "$id" ]]; then
+        echo "=== Leaderboard: $id ==="
+        echo ""
+        jq -r --arg id "$id" '
+            .[$id] // {} | to_entries | sort_by(.value) |
+            to_entries[] | "\(.key + 1). \(.value.key) — \(.value.value) bytes"
+        ' "$SCORES_FILE" 2>/dev/null || echo "  No submissions yet."
+    else
+        echo "=== Global Leaderboard ==="
+        echo ""
+        jq -r '
+            to_entries[] | .key as $challenge |
+            .value | to_entries | sort_by(.value) |
+            [$challenge, (.[0].key // "—"), (.[0].value // "—")] |
+            "\(.[0]): \(.[1]) (\(.[2]) bytes)"
+        ' "$SCORES_FILE" 2>/dev/null || echo "  No submissions yet."
+    fi
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    challenge|c)  show_challenge "${1:-}" ;;
+    list|ls)      list_challenges ;;
+    submit|s)     submit_solution "${1:?missing challenge id}" "${2:?missing solution file}" ;;
+    verify|v)     verify_solution "${1:?missing challenge id}" "${2:?missing solution file}" ;;
+    leaderboard|lb) show_leaderboard "${1:-}" ;;
+    help|--help|-h) usage ;;
+    *)            echo "Unknown command: $cmd"; usage; exit 1 ;;
+esac

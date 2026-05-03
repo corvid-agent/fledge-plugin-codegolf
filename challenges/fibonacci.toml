@@ -1,0 +1,7 @@
+name = "Fibonacci"
+difficulty = "medium"
+description = "Read N from stdin. Print the first N Fibonacci numbers, one per line (starting 1, 1, 2, 3, 5...)."
+
+[[examples]]
+input = "7"
+output = "1\n1\n2\n3\n5\n8\n13"

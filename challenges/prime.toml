@@ -1,0 +1,7 @@
+name = "Prime Check"
+difficulty = "medium"
+description = "Read a number N from stdin. Print 'yes' if prime, 'no' otherwise."
+
+[[examples]]
+input = "17"
+output = "yes"

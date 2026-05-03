@@ -1,0 +1,7 @@
+name = "Caesar Cipher"
+difficulty = "hard"
+description = "Read two lines: a shift number and a string. Print the string with each letter shifted by that amount (wrapping a-z). Non-letters unchanged."
+
+[[examples]]
+input = "3\nhello"
+output = "khoor"

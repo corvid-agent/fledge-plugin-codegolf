@@ -1,0 +1,7 @@
+name = "Reverse String"
+difficulty = "easy"
+description = "Read a string from stdin and print it reversed."
+
+[[examples]]
+input = "hello"
+output = "olleh"
