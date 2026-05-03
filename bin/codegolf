@@ -130,11 +130,22 @@ verify_solution() {
         [[ -f "$expected_file" ]] || continue
 
         total=$((total + 1))
+        run_with_timeout() {
+            local limit=10
+            if command -v timeout &>/dev/null; then
+                timeout "$limit" "$@"
+            elif command -v gtimeout &>/dev/null; then
+                gtimeout "$limit" "$@"
+            else
+                perl -e 'alarm shift; exec @ARGV' "$limit" "$@"
+            fi
+        }
+
         local actual=""
         if [[ -n "$runner" ]]; then
-            actual=$($runner "$solution_file" < "$input_file" 2>/dev/null) || true
+            actual=$(ulimit -v 262144 2>/dev/null; run_with_timeout $runner "$solution_file" < "$input_file" 2>/dev/null) || true
         elif [[ -x "$solution_file" ]]; then
-            actual=$("$solution_file" < "$input_file" 2>/dev/null) || true
+            actual=$(ulimit -v 262144 2>/dev/null; run_with_timeout "$solution_file" < "$input_file" 2>/dev/null) || true
         else
             echo "Cannot run .$ext files — no interpreter found and file not executable."
             exit 1

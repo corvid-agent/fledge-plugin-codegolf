@@ -10,6 +10,6 @@ description = "Code golf challenges and leaderboard"
 binary = "bin/codegolf"
 
 [capabilities]
-exec = false
+exec = true
 store = false
 metadata = false
