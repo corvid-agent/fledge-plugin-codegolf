@@ -1,6 +1,6 @@
 [plugin]
 name = "codegolf"
-version = "0.1.0"
+version = "0.2.1"
 description = "Code golf arena — write the shortest solution to programming puzzles"
 author = "corvid-agent"
 
